@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>重力4目並べ</title>
+  <style>
+    body { font-family: sans-serif; text-align: center; }
+    #game-board table { margin: auto; border-collapse: collapse; }
+    td { width: 50px; height: 50px; border: 1px solid #333; background-color: #f0f0f0; position: relative; cursor: pointer; }
+    td .stone {
+      width: 40px; height: 40px;
+      border-radius: 50%;
+      position: absolute;
+      top: 5px; left: 5px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+      transition: box-shadow 6s;
+    }
+    .stone.red { background-color: #d00; }
+    .stone.blue { background-color: #1e4eb0; }
+    #column-buttons { margin: 8px auto 0 auto; text-align: center; }
+    #messages { white-space: pre-wrap; background: #eee; padding: 10px; width: 330px; margin: 10px auto; text-align: left; border-radius: 5px;}
+    button { font-size: 18px; margin: 3px; padding: 8px 10px;}
+  </style>
+</head>
+<body>
+<h1>重力4目並べ</h1>
+<div id="game-board"></div>
+<div id="controls"></div>
+<pre id="messages"></pre>
+<script>
+class Player {
+  constructor(name, order) { this.name = name; this.order = order; }
+  async put(grid) { throw new Error("Not implemented"); }
+  getName() { return this.name; }
+  getOrder() { return this.order; }
+  getColor() { return this.order === 0 ? "red" : "blue"; }
+}
+class Man extends Player {
+  constructor(name, order, board) { super(name, order); this.board = board; }
+  put(grid) {
+    return new Promise(resolve => {
+      const handler = e => {
+        const col = parseInt(e.target.dataset.col);
+        if (!isNaN(col)) {
+          this.board.clearColBtnHandlers();
+          resolve(col);
+        }
+      };
+      this.board.setColBtnHandler(handler);
+      this.board.enableColBtns(true);
+    });
+  }
+}
+
+class Judge {
+  constructor(rows, cols) { this.rows = rows; this.cols = cols; }
+  checkWinner(order, row, col, grid) {
+    return (
+      this.count(order, row, col, 0, 1, grid) + this.count(order, row, col, 0, -1, grid) >= 3 ||
+      this.count(order, row, col, 1, 0, grid) >= 3 ||
+      this.count(order, row, col, 1, 1, grid) + this.count(order, row, col, -1, -1, grid) >= 3 ||
+      this.count(order, row, col, 1, -1, grid) + this.count(order, row, col, -1, 1, grid) >= 3
+    );
+  }
+  count(order, row, col, dr, dc, grid) {
+    let cnt = 0;
+    for (let i = 1; i <= 3; i++) {
+      const r = row + dr * i, c = col + dc * i;
+      if (r < 0 || r >= this.rows || c < 0 || c >= this.cols || grid[r][c] !== order) break; cnt++;
+    }
+    return cnt;
+  }
+  canPut(col, grid) {
+    for (let row = this.rows - 1; row >= 0; row--) {
+      if (grid[row][col] === -1) return row;
+    }
+    return -1;
+  }
+}
+
+//Board
+class Board {
+  constructor(rows, cols, containerId) {
+    this.rows = rows; this.cols = cols;
+    this.container = document.getElementById(containerId);
+    this.grid = [];
+    this.buttons = [];
+    this.clickHandler = null;
+    this.colBtns = [];
+    this.init();
+  }
+
+  init() {
+    this.container.innerHTML = "";
+    this.grid = Array.from({ length: this.rows }, () => Array(this.cols).fill(-1));
+    const table = document.createElement("table");
+    this.buttons = [];
+    for (let row = 0; row < this.rows; row++) {
+      const tr = document.createElement("tr"); const btnRow = [];
+      for (let col = 0; col < this.cols; col++) {
+        const td = document.createElement("td");
+        td.dataset.row = row; td.dataset.col = col;
+        tr.appendChild(td); btnRow.push(td);
+      }
+      table.appendChild(tr); this.buttons.push(btnRow);
+    }
+    this.container.appendChild(table);
+
+    // ボタン行
+    this.renderColButtons();
+  }
+
+  renderColButtons() {
+    let btnRow = document.getElementById("column-buttons");
+    if (!btnRow) {
+      btnRow = document.createElement("div");
+      btnRow.id = "column-buttons";
+      btnRow.style.marginTop = "8px";
+      btnRow.style.textAlign = "center";
+      this.container.appendChild(btnRow);
+    }
+    btnRow.innerHTML = "";
+    this.colBtns = [];
+    for (let i = 0; i < this.cols; i++) {
+      const btn = document.createElement("button");
+      btn.textContent = (i + 1).toString();
+      btn.style.width = "48px";
+      btn.style.height = "32px";
+      btn.dataset.col = i;
+      btn.disabled = true;
+      btnRow.appendChild(btn);
+      this.colBtns.push(btn);
+    }
+  }
+  setColBtnHandler(handler) { for (const btn of this.colBtns) btn.onclick = handler; }
+  enableColBtns(flag) { for (const btn of this.colBtns) btn.disabled = !flag; }
+  clearColBtnHandlers() { for (const btn of this.colBtns) { btn.onclick = null; btn.disabled = true; } }
+
+  //  落下アニメーション
+  async update(row, col, color) {
+    if (this.grid[row][col] !== -1) return;
+    const delay = 135; // 速さ調整
+    // 各行で石を順に表示
+    for (let r = 0; r <= row; r++) {
+      const stone = document.createElement("div");
+      stone.className = `stone ${color}`;
+      stone.style.opacity = r === row ? "1" : "0.7";
+      this.buttons[r][col].appendChild(stone);
+
+      if (r > 0) {
+        await new Promise(res => setTimeout(res, delay));
+        this.buttons[r - 1][col].innerHTML = "";
+      }
+    }
+    await new Promise(res => setTimeout(res, delay));
+    this.grid[row][col] = color === "red" ? 0 : 1;
+    this.buttons[row][col].innerHTML = "";
+    const stone = document.createElement("div");
+    stone.className = `stone ${color}`;
+    this.buttons[row][col].appendChild(stone);
+  }
+
+  reset() { this.init(); }
+  getGrid() { 
+    return this.grid.map(row => row.slice()); 
+  }
+}
+
+class Recorder {
+  constructor(displayId) { this.display = document.getElementById(displayId); this.logs = []; }
+  record(player, col) {
+    const log = `${player.getName()}（${player.getColor()}）：列 ${col + 1}`;
+    this.logs.push(log); this.render();
+  }
+  render() { this.display.textContent = this.logs.join("\n"); }
+  clear() { this.logs = []; this.render(); }
+}
+
+class Com extends Player {
+  constructor(name, order, judge, strategy = "MONTE_CARLO") {
+    super(name, order);
+    this.judge = judge;
+    this.strategy = strategy;
+    this.MAX_DEPTH = 4;
+    this.MONTE_CARLO_SIMULATIONS = 20;
+  }
+  getOrder() { return this.order; }
+  getOpponentOrder() { return (this.getOrder() === 0) ? 1 : 0; }
+  deepCopyGrid(grid) { return grid.map(row => row.slice()); }
+  isFull(grid) {
+    for(let col=0; col<grid[0].length; col++)
+      if(this.judge.canPut(col, grid) !== -1) return false;
+    return true;
+  }
+  getNextOpenRow(grid, col) {
+    for(let row=grid.length-1; row>=0; row--){
+      if(grid[row][col]==-1) return row;
+    }
+    return -1;
+  }
+  getAvailableColumns(grid) {
+    let available = [];
+    for(let col=0; col<grid[0].length; col++) {
+      if(this.judge.canPut(col, grid) !== -1) available.push(col);
+    }
+    return available;
+  }
+  prioritizeColumns(availableColumns, totalColumns) {
+    const center = Math.floor(totalColumns / 2);
+    availableColumns.sort((a, b) => Math.abs(center - a) - Math.abs(center - b));
+    const topN = Math.min(3, availableColumns.length);
+    const topChoices = availableColumns.slice(0, topN);
+    return topChoices[Math.floor(Math.random()*topChoices.length)];
+  }
+  getMoveOrder(grid) {
+    let order = [];
+    const center = Math.floor(grid[0].length/2);
+    order.push(center);
+    let sides = [];
+    for(let i=1;i<=center;i++) {
+      if(center-i>=0) sides.push(center-i);
+      if(center+i<grid[0].length) sides.push(center+i);
+    }
+    for(let i = sides.length-1; i>0; i--) {
+      let j = Math.floor(Math.random()*(i+1));
+      [sides[i],sides[j]] = [sides[j],sides[i]];
+    }
+    order.push(...sides);
+    return order;
+  }
+
+  evaluateBoard(grid) {
+    let score = 0;
+    let centerColumn = Math.floor(grid[0].length / 2);
+    let centerCount = 0;
+    for (let row = 0; row < grid.length; row++) {
+      if (grid[row][centerColumn] === this.getOrder()) centerCount++;
+    }
+    score += centerCount * 3;
+    score += this.evaluateLines(grid, this.getOrder());
+    score -= this.evaluateLines(grid, this.getOpponentOrder()) * 2;
+    return score;
+  }
+  evaluateLines(grid, player) {
+    let score = 0;
+    for (let row = 0; row < grid.length; row++) {
+      for (let col = 0; col < grid[0].length - 3; col++) {
+        let window = [];
+        for (let i = 0; i < 4; i++) window.push(grid[row][col + i]);
+        score += this.getScoreForWindow(window, player);
+      }
+    }
+    for (let col = 0; col < grid[0].length; col++) {
+      for (let row = 0; row < grid.length - 3; row++) {
+        let window = [];
+        for (let i = 0; i < 4; i++) window.push(grid[row + i][col]);
+        score += this.getScoreForWindow(window, player);
+      }
+    }
+    for (let row = 0; row < grid.length - 3; row++) {
+      for (let col = 0; col < grid[0].length - 3; col++) {
+        let window = [];
+        for (let i = 0; i < 4; i++) window.push(grid[row + i][col + i]);
+        score += this.getScoreForWindow(window, player);
+      }
+    }
+    for (let row = 0; row < grid.length - 3; row++) {
+      for (let col = 3; col < grid[0].length; col++) {
+        let window = [];
+        for (let i = 0; i < 4; i++) window.push(grid[row + i][col - i]);
+        score += this.getScoreForWindow(window, player);
+      }
+    }
+    return score;
+  }
+  getScoreForWindow(window, player) {
+    let score = 0;
+    const opponent = this.getOpponentOrder();
+    let playerCount = 0, empty = 0, opponentCount = 0;
+    for (let cell of window) {
+      if (cell === player) playerCount++;
+      else if (cell === opponent) opponentCount++;
+      else empty++;
+    }
+    if (playerCount === 4) score += 100;
+    else if (playerCount === 3 && empty === 1) score += 10;
+    else if (playerCount === 2 && empty === 2) score += 5;
+    if (opponentCount === 3 && empty === 1) score -= 100;
+    else if (opponentCount === 2 && empty === 2) score -= 10;
+    return score;
+  }
+
+  async put(grid) {
+    await new Promise(r => setTimeout(r, 250));
+    for (let col of this.getMoveOrder(grid)) {
+      if (this.judge.canPut(col, grid) != -1) {
+        const row = this.getNextOpenRow(grid, col);
+        if (row != -1) {
+          let gridCopy = this.deepCopyGrid(grid);
+          gridCopy[row][col] = this.getOpponentOrder();
+          if (this.judge.checkWinner(this.getOpponentOrder(), row, col, gridCopy)) return col;
+        }
+      }
+    }
+    for (let col of this.getMoveOrder(grid)) {
+      if (this.judge.canPut(col, grid) != -1) {
+        const row = this.getNextOpenRow(grid, col);
+        if (row != -1) {
+          let gridCopy = this.deepCopyGrid(grid);
+          gridCopy[row][col] = this.getOrder();
+          if (this.judge.checkWinner(this.getOrder(), row, col, gridCopy)) return col;
+        }
+      }
+    }
+    let putColumn = -1;
+    switch (this.strategy) {
+      case "MAXIMIN": putColumn = this.maximinDecision(grid, this.MAX_DEPTH); break;
+      case "MINIMAX": putColumn = this.minimaxDecision(grid, this.MAX_DEPTH); break;
+      case "MONTE_CARLO": putColumn = this.monteCarloDecision(grid, this.MONTE_CARLO_SIMULATIONS); break;
+      default: putColumn = -1; break;
+    }
+    if (putColumn == -1) {
+      let available = this.getAvailableColumns(grid);
+      if (available.length > 0) {
+        putColumn = this.prioritizeColumns(available, grid[0].length);
+      } else {
+        return 0;
+      }
+    }
+    return putColumn;
+  }
+  minimaxDecision(grid, depth) {
+    let bestScore = -Infinity, bestColumn = -1;
+    for (let col of this.getMoveOrder(grid)) {
+      if (this.judge.canPut(col, grid) !== -1) {
+        const row = this.getNextOpenRow(grid, col);
+        if (row !== -1) {
+          const gridCopy = this.deepCopyGrid(grid);
+          gridCopy[row][col] = this.getOrder();
+          const win = this.judge.checkWinner(this.getOrder(), row, col, gridCopy);
+          const score = win ? 1000000 : this.minimax(gridCopy, depth - 1, false, -Infinity, Infinity);
+          if (score > bestScore) { bestScore = score; bestColumn = col; }
+        }
+      }
+    }
+    return bestColumn;
+  }
+  minimax(grid, depth, isMaximizing, alpha, beta) {
+    if (depth === 0 || this.isFull(grid)) return this.evaluateBoard(grid);
+    if (isMaximizing) {
+      let maxEval = -Infinity;
+      for (let col of this.getMoveOrder(grid)) {
+        if (this.judge.canPut(col, grid) !== -1) {
+          let row = this.getNextOpenRow(grid, col);
+          if (row !== -1) {
+            let gridCopy = this.deepCopyGrid(grid);
+            gridCopy[row][col] = this.getOrder();
+            let win = this.judge.checkWinner(this.getOrder(), row, col, gridCopy);
+            let eval_ = win ? 1000000 : this.minimax(gridCopy, depth - 1, false, alpha, beta);
+            maxEval = Math.max(maxEval, eval_);
+            alpha = Math.max(alpha, eval_);
+            if (alpha >= beta) break;
+          }
+        }
+      }
+      return maxEval;
+    } else {
+      let minEval = Infinity;
+      for (let col of this.getMoveOrder(grid)) {
+        if (this.judge.canPut(col, grid) !== -1) {
+          let row = this.getNextOpenRow(grid, col);
+          if (row !== -1) {
+            let gridCopy = this.deepCopyGrid(grid);
+            gridCopy[row][col] = this.getOpponentOrder();
+            let win = this.judge.checkWinner(this.getOpponentOrder(), row, col, gridCopy);
+            let eval_ = win ? -1000000 : this.minimax(gridCopy, depth - 1, true, alpha, beta);
+            minEval = Math.min(minEval, eval_);
+            beta = Math.min(beta, eval_);
+            if (alpha >= beta) break;
+          }
+        }
+      }
+      return minEval;
+    }
+  }
+  maximinDecision(grid, depth) {
+    let bestScore = Infinity, bestColumn = -1;
+    for (let col of this.getMoveOrder(grid)) {
+      if (this.judge.canPut(col, grid) !== -1) {
+        const row = this.getNextOpenRow(grid, col);
+        if (row !== -1) {
+          const gridCopy = this.deepCopyGrid(grid);
+          gridCopy[row][col] = this.getOpponentOrder();
+          const win = this.judge.checkWinner(this.getOpponentOrder(), row, col, gridCopy);
+          const score = win ? -1000000 : this.maximin(gridCopy, depth - 1, false, -Infinity, Infinity);
+          if (score < bestScore) { bestScore = score; bestColumn = col; }
+        }
+      }
+    }
+    return bestColumn;
+  }
+  maximin(grid, depth, isMaximizing, alpha, beta) {
+    if (depth === 0 || this.isFull(grid)) return this.evaluateBoard(grid);
+    if (isMaximizing) {
+      let maxEval = -Infinity;
+      for (let col of this.getMoveOrder(grid)) {
+        if (this.judge.canPut(col, grid) !== -1) {
+          let row = this.getNextOpenRow(grid, col);
+          if (row !== -1) {
+            let gridCopy = this.deepCopyGrid(grid);
+            gridCopy[row][col] = this.getOpponentOrder();
+            let win = this.judge.checkWinner(this.getOpponentOrder(), row, col, gridCopy);
+            let eval_ = win ? -1000000 : this.maximin(gridCopy, depth - 1, false, alpha, beta);
+            maxEval = Math.max(maxEval, eval_);
+            alpha = Math.max(alpha, eval_);
+            if (alpha >= beta) break;
+          }
+        }
+      }
+      return maxEval;
+    } else {
+      let minEval = Infinity;
+      for (let col of this.getMoveOrder(grid)) {
+        if (this.judge.canPut(col, grid) !== -1) {
+          let row = this.getNextOpenRow(grid, col);
+          if (row !== -1) {
+            let gridCopy = this.deepCopyGrid(grid);
+            gridCopy[row][col] = this.getOrder();
+            let win = this.judge.checkWinner(this.getOrder(), row, col, gridCopy);
+            let eval_ = win ? 1000000 : this.maximin(gridCopy, depth - 1, true, alpha, beta);
+            minEval = Math.min(minEval, eval_);
+            beta = Math.min(beta, eval_);
+            if (alpha >= beta) break;
+          }
+        }
+      }
+      return minEval;
+    }
+  }
+
+  monteCarloDecision(grid, simulations) {
+    let availableColumns = this.getAvailableColumns(grid);
+    if(availableColumns.length===0) return this.prioritizeColumns(availableColumns, grid[0].length);
+    let bestColumn = -1, bestWinRate = -1.0;
+    for(let col of availableColumns){
+      let winCount = 0;
+      for(let i=0;i<simulations;i++){
+        let gridCopy = this.deepCopyGrid(grid);
+        let row = this.getNextOpenRow(gridCopy, col);
+        if(row === -1) continue;
+        gridCopy[row][col] = this.getOrder();
+        if (this.judge.checkWinner(this.getOrder(), row, col, gridCopy)) {
+          winCount++; continue;
+        }
+        let currentPlayer = this.getOpponentOrder();
+        while(true){
+          let available = this.getAvailableColumns(gridCopy);
+          if(available.length===0) break;
+          let randomCol = available[Math.floor(Math.random()*available.length)];
+          let randomRow = this.getNextOpenRow(gridCopy, randomCol);
+          if(randomRow === -1) break;
+          gridCopy[randomRow][randomCol] = currentPlayer;
+          if(this.judge.checkWinner(currentPlayer, randomRow, randomCol, gridCopy)){
+            if(currentPlayer===this.getOrder()) winCount++;
+            break;
+          }
+          currentPlayer = (currentPlayer===0)?1:0;
+        }
+      }
+      let winRate = winCount/simulations;
+      if(winRate > bestWinRate){
+        bestWinRate = winRate; bestColumn = col;
+      }
+    }
+    return bestColumn;
+  }
+}
+
+// --------------- Game管理 ----------------
+class Game {
+  constructor(rows = 6, cols = 7) {
+    this.rows = rows; this.cols = cols;
+    this.judge = new Judge(rows, cols);
+    this.board = new Board(rows, cols, "game-board");
+    this.recorder = new Recorder("messages");
+    this.players = [
+      new Man("あなた", 0, this.board),
+      new Com("THEORIST", 1, this.judge, "MONTE_CARLO") // 策略: "MINIMAX" "MAXIMIN"も可
+    ];
+    this.turn = 0; this.running = false;
+    document.getElementById("controls").innerHTML = `<button id="start-btn">スタート</button>`;
+    document.getElementById("start-btn").onclick = () => this.start();
+  }
+
+  async start() {
+    this.board.reset(); this.recorder.clear(); this.turn = 0; this.running = true;
+    while (this.running) {
+      const player = this.players[this.turn % 2];
+      const isHuman = (player instanceof Man);
+      this.board.enableColBtns(isHuman);
+      const grid = this.board.getGrid();
+      const col = await player.put(grid);
+      this.board.enableColBtns(false);
+
+      const row = this.judge.canPut(col, grid);
+      if (row === -1) { alert("そこには置けません！"); continue; }
+      await this.board.update(row, col, player.getColor());
+      this.recorder.record(player, col);
+
+      if (this.judge.checkWinner(player.getOrder(), row, col, this.board.getGrid())) {
+        alert(`${player.getName()}（${player.getColor()}）の勝ち！`);
+        this.running = false; return;
+      }
+      if (this.isFull(this.board.getGrid())) {
+        alert("引き分け！"); this.running = false; return;
+      }
+      this.turn++;
+    }
+  }
+
+  isFull(grid) { return grid[0].every(cell => cell !== -1); }
+}
+
+window.onload = () => { new Game(); };
+</script>
+</body>
+</html>
