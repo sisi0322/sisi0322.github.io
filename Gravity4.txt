@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>重力4目並べ（完全版）</title>
+  <style>
+    body { font-family: sans-serif; text-align: center; background: #f0f0f0; }
+    #game-board table { margin: auto; border-collapse: collapse; }
+    td { width: 50px; height: 50px; border: 1px solid #333; background: white; }
+    .stone1 { background: red; border-radius: 50%; }
+    .stone2 { background: yellow; border-radius: 50%; }
+    #controls button { margin: 5px; padding: 10px; }
+    #messages { margin-top: 20px; font-size: 18px; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h1>重力4目並べ（人間 vs AI）</h1>
+  <div id="controls"></div>
+  <div id="game-board"></div>
+  <div id="messages"></div>
+
+  <script>
+  /*
+  ?? 構成まとめ
+  - Player / Man / Com
+    - Man: プレイヤーがボタンで列を選択することを管理している
+    - Com: コンピュータ Comクラスで戦略は管理している
+  - Board
+    - 盤面データと描画処理を担当
+    - 勝敗判定を行う
+  - Game
+    - プレイヤーの交互処理を制御しており、人間入力を待ちとAIの思考を管理しているClass
+
+  このコードはJavaで制作した重力4目並べJavaScriptに書き換えたものです
+  */
+
+  // --- Player基底クラス ---
+  class Player {
+    constructor(name, order) {
+      this.name = name;
+      this.order = order;
+    }
+    async put(grid) { throw new Error("Not implemented"); }
+    getStone() { return this.order; }
+  }
+
+  // --- プレイヤー Manクラス ---
+  class Man extends Player {
+    constructor(name, order, controls) {
+      super(name, order);
+      this.controls = controls;
+      this.resolve = null;
+      this.setupControls();
+    }
+    setupControls() {
+      this.controls.innerHTML = "";
+      for (let i = 0; i < 7; i++) {
+        const btn = document.createElement("button");
+        btn.textContent = (i + 1) + "列";
+        btn.onclick = () => {
+          if (this.resolve) {
+            this.resolve(i);
+            this.resolve = null;
+          }
+        };
+        this.controls.appendChild(btn);
+      }
+    }
+    async put(grid) {
+      return new Promise(resolve => {
+        this.resolve = resolve;
+      });
+    }
+  }
+
+  // --- コンピュータComクラス ---
+  class Com extends Player {
+    constructor(name, order) {
+      super(name, order);
+    }
+    async put(board) {
+      let bestScore = -Infinity;
+      let bestCol = null;
+      for (let c = 0; c < 7; c++) {
+        let r = board.getRow(c);
+        if (r !== -1) {
+          board.grid[r][c] = this.order;
+          let score = this.minimax(board, 0, false);
+          board.grid[r][c] = 0;
+          if (score > bestScore) {
+            bestScore = score;
+            bestCol = c;
+          }
+        }
+      }
+      return bestCol;
+    }
+    minimax(board, depth, isMaximizing) {
+      let winner = board.checkWinner();
+      if (winner === this.order) return 10 - depth;
+      if (winner === 3 - this.order) return depth - 10;
+      if (board.isFull()) return 0;
+
+      if (isMaximizing) {
+        let maxEval = -Infinity;
+        for (let c = 0; c < 7; c++) {
+          let r = board.getRow(c);
+          if (r !== -1) {
+            board.grid[r][c] = this.order;
+            let evalScore = this.minimax(board, depth + 1, false);
+            board.grid[r][c] = 0;
+            maxEval = Math.max(maxEval, evalScore);
+          }
+        }
+        return maxEval;
+      } else {
+        let minEval = Infinity;
+        for (let c = 0; c < 7; c++) {
+          let r = board.getRow(c);
+          if (r !== -1) {
+            board.grid[r][c] = 3 - this.order;
+            let evalScore = this.minimax(board, depth + 1, true);
+            board.grid[r][c] = 0;
+            minEval = Math.min(minEval, evalScore);
+          }
+        }
+        return minEval;
+      }
+    }
+  }
+
+  // --- Boaedクラス ---
+  class Board {
+    constructor(boardDiv) {
+      this.rows = 6;
+      this.cols = 7;
+      this.grid = Array.from({ length: this.rows }, () => Array(this.cols).fill(0));
+      this.boardDiv = boardDiv;
+      this.render();
+    }
+    render() {
+      const table = document.createElement("table");
+      for (let r = 0; r < this.rows; r++) {
+        const tr = document.createElement("tr");
+        for (let c = 0; c < this.cols; c++) {
+          const td = document.createElement("td");
+          if (this.grid[r][c] === 1) td.classList.add("stone1");
+          if (this.grid[r][c] === 2) td.classList.add("stone2");
+          tr.appendChild(td);
+        }
+        table.appendChild(tr);
+      }
+      this.boardDiv.innerHTML = "";
+      this.boardDiv.appendChild(table);
+    }
+    getRow(c) {
+      for (let r = this.rows - 1; r >= 0; r--) {
+        if (this.grid[r][c] === 0) return r;
+      }
+      return -1;
+    }
+    isFull() {
+      return this.grid.every(row => row.every(cell => cell !== 0));
+    }
+    checkWinner() {
+      const dirs = [[1,0],[0,1],[1,1],[1,-1]];
+      for (let r=0;r<this.rows;r++){
+        for (let c=0;c<this.cols;c++){
+          if (this.grid[r][c]!==0){
+            for (let [dr,dc] of dirs){
+              if (this.checkLine(r,c,dr,dc)) return this.grid[r][c];
+            }
+          }
+        }
+      }
+      return null;
+    }
+    checkLine(r,c,dr,dc){
+      let player=this.grid[r][c];
+      for (let i=1;i<4;i++){
+        let nr=r+dr*i,nc=c+dc*i;
+        if (nr<0||nr>=this.rows||nc<0||nc>=this.cols) return false;
+        if (this.grid[nr][nc]!==player) return false;
+      }
+      return true;
+    }
+  }
+
+  // --- Gameクラス ---
+  class Game {
+    constructor() {
+      this.board = new Board(document.getElementById("game-board"));
+      this.man = new Man("あなた",1,document.getElementById("controls"));
+      this.com = new Com("AI",2);
+      this.current = this.man;
+      this.messages = document.getElementById("messages");
+      this.loop();
+    }
+    async loop() {
+      while (true) {
+        let col = await this.current.put(this.board);
+        let row = this.board.getRow(col);
+        if (row === -1) {
+          this.messages.textContent = "その列は埋まっています！";
+          continue;
+        }
+        this.board.grid[row][col] = this.current.getStone();
+        this.board.render();
+        let winner = this.board.checkWinner();
+        if (winner) {
+          this.messages.textContent = (winner === 1 ? "あなたの勝ち！" : "AIの勝ち！");
+          break;
+        }
+        if (this.board.isFull()) {
+          this.messages.textContent = "引き分け！";
+          break;
+        }
+        this.current = this.current === this.man ? this.com : this.man;
+      }
+    }
+  }
+
+  // --- ゲーム開始 ---
+  new Game();
+  </script>
+</body>
+</html>
