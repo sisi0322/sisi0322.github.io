@@ -661,7 +661,7 @@ class Game {
   renderAvatars(activeOrder) {
     const sides = [
       {id:"avatar-user", icon:"*'ω'*", name:"あなた", color:"user"},
-      {id:"avatar-com",  icon:" ", name:"COM",   color:"com"}
+      {id:"avatar-com",  icon:"📚", name:"COM",   color:"com"}
     ];
     for(const side of sides) {
       const area = document.getElementById(side.id);
@@ -674,7 +674,7 @@ class Game {
   }
   showWinnerBanner(name, color) {
     const el = this.banner;
-    el.innerHTML = `<span style="font-size:2.5em;"> </span> <span style="color:${color==='red'?'#d00':'#074fb7'};">${name}</span>の勝ち！ <span style="font-size:2.1em;"> </span>`;
+    el.innerHTML = `<span style="font-size:2.5em;">🎉</span> <span style="color:${color==='red'?'#d00':'#074fb7'};">${name}</span>の勝ち！ <span style="font-size:2.1em;">🏅</span>`;
     el.style.display = "block";
     setTimeout(()=>el.style.boxShadow="0 0 80px #fc0e", 700);
   }
